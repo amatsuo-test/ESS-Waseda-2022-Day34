@@ -35,7 +35,9 @@ library(rvest)
 url <- "https://en.wikipedia.org/wiki/International_court"
 ht <- read_html(url)
 list_tables <- ht %>% html_table()
-
+list_tables
+df_ic <- list_tables[[1]]
+df_ic
 ```
 
 ## Text modifying
@@ -43,7 +45,11 @@ list_tables <- ht %>% html_table()
 - Extract the starting year of each court using regex
 
 ```{r}
-
+library(stringi)
+df_ic <- df_ic %>% 
+  mutate(start = `Years active` %>% stri_extract_first_regex("\\d{4}") %>% as.integer()) %>%
+  mutate(Africa = `Subject matter and scope` %>% stri_detect_regex("africa", opts_regex = stri_opts_regex(case_insensitive = T)) ) 
+  
 ```
 
 
@@ -51,7 +57,7 @@ list_tables <- ht %>% html_table()
 
 
 ```{r}
-#write_csv("")
+write_csv(df_ic, "df_ic.csv")
 ```
 
 # List of Petitions
@@ -67,13 +73,23 @@ ht <- read_html(url)
 - Scenario 2
 
 ```{r}
-petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
+petition_title <- ht %>% html_elements(".petition-open a") %>% html_text()
 ```
 
 ## Extract number of signatures
 
 
 ```{r}
+signature <- ht %>% html_elements(".count") %>% html_text() %>%
+  stri_replace_all_fixed(',', '') %>% as.integer()
+
+signature <- ht %>% html_elements(".count") %>% 
+  stri_extract_all_regex("\\d[,0-9]+") %>%
+  map(~.x[1]) %>% unlist() %>% as.integer()
+
+signature <- ht %>% html_elements(".count") %>% 
+  html_attr("data-count") %>% as.integer()
+
 
 ```
 
@@ -81,6 +97,8 @@ petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
 
 
 ```{r}
+id <- ht %>% html_elements(".petition-open a") %>%
+  html_attr("href") %>% stri_extract_first_regex("\\d+")
 
 ```
 
@@ -88,7 +106,7 @@ petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
 
 
 ```{r}
-
+df_petition <- tibble(id, petition_title, signature)
 ```
 
 
@@ -96,7 +114,7 @@ petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
 
 
 ```{r}
-#write_csv(df_petition, "df_petition.csv")
+write_csv(df_petition, "df_petition.csv")
 ```
 
 # Find how many pages in total
@@ -104,15 +122,20 @@ petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
 
 ```{r}
 
+total_pages <- ht %>% html_element(".page-count") %>% html_text() %>%
+  stri_extract_last_regex("\\d+") %>% as.integer()
+
 ```
 
 ## Playing with the search/selection box
 
-- How many open petitions regarding Uklaine?
+- How many open petitions regarding Ukraine?
 
 
 ```{r}
-
+url <- "https://petition.parliament.uk/petitions?q=Ukraine&state=open"
+ht2 <- read_html(url)
+ht2 %>% html_element(".filtered-petition-count") %>% html_text()
 ```
 
 # Create a function to extract later pages
@@ -120,32 +143,65 @@ petition_title <- ht %>% html_elements(".petition-open h2") %>% html_text()
 The function:
 - takes page number as an argument
 
-You can download the current notebook as a python script and then copy and paste relavent part.
-
-
-
 
 ```{r}
+fetch_page <- function(page_number, sl_sec = 3) {
+  url_template <- "https://petition.parliament.uk/petitions?page=%s&state=open"
+  url <- sprintf(url_template, page_number)
+  ht <- read_html(url)
+  petition_title <- ht %>% html_elements(".petition-open a") %>% html_text()
+  signature <- ht %>% html_elements(".count") %>% 
+    html_attr("data-count") %>% as.integer()
+  id <- ht %>% html_elements(".petition-open a") %>%
+    html_attr("href") %>% stri_extract_first_regex("\\d+")
+  df_petition <- tibble(id, petition_title, signature)
+  Sys.sleep(sl_sec)
+  return(df_petition)
+}
 
+fetch_page(2)
 ```
 
 ### Using the function get first pages 2 to 10
 
-- After downloading, combine DataFrames with `pd.concat()`
-
 
 ```{r}
+list_df <- map(2:10, fetch_page)
+list_df
 
+#list_df <- map(2:10, ~fetch_page(.x, sl_sec = 1))
+
+df_allpetitions <- bind_rows(df_petition, list_df)
 ```
 
 ## Save as csv
 
 
 ```{r}
-#write_csv(df_allpetition, "df_allpetition.csv")
+write_csv(df_allpetitions, "df_allpetitions.csv")
 ```
 
 
 ```{r}
 
+
+fetch_page2 <- function(url, sl_sec = 3) {
+  ht <- read_html(url)
+  petition_title <- ht %>% html_elements(".petition-open a") %>% html_text()
+  signature <- ht %>% html_elements(".count") %>% 
+    html_attr("data-count") %>% as.integer()
+  id <- ht %>% html_elements(".petition-open a") %>%
+    html_attr("href") %>% stri_extract_first_regex("\\d+")
+  df_petition <- tibble(id, petition_title, signature)
+  Sys.sleep(sl_sec)
+  return(df_petition)
+}
+
+list_df2 <- 1:10 %>% 
+  map(~sprintf("https://petition.parliament.uk/petitions?page=%s&state=open", .x)) %>%
+  map(fetch_page2) 
+
+df_allpetitions2 <- bind_rows(list_df2)
+
 ```
+
